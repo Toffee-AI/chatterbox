@@ -3,6 +3,7 @@ from typing import Optional
 import torch
 from torch import nn as nn
 from transformers import LlamaConfig, LlamaModel, LlamaPreTrainedModel, GenerationMixin
+from transformers.cache_utils import DynamicCache
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 
@@ -34,7 +35,7 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
 
     @torch.inference_mode()
     def prepare_inputs_for_generation(
-        self, input_ids: torch.Tensor, decoder_cond: torch.Tensor, use_cache: bool, past_key_values=None,
+        self, input_ids: torch.Tensor, decoder_cond: torch.Tensor, use_cache: bool, past_key_values: Optional[DynamicCache]=None,
         # This argument was introduced in some recent version of transformers (>=4.29.1)
         cache_position=None
     ):
@@ -73,7 +74,7 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
     def forward(
         self,
         inputs_embeds: torch.Tensor,
-        past_key_values: Optional[torch.Tensor]=None,
+        past_key_values: Optional[DynamicCache]=None,
         use_cache=True,
         output_attentions=False,
         output_hidden_states=True,
@@ -87,7 +88,7 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         S should be 1.
         """
         is_large_input = inputs_embeds.size(1) != 1
-        has_cache = past_key_values is not None and len(past_key_values) > 0
+        has_cache = past_key_values is not None and past_key_values.get_seq_length() > 0
         assert not (is_large_input and has_cache)
         assert return_dict
         assert output_hidden_states

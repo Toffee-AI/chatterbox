@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 from transformers import LlamaModel, LlamaConfig
+from transformers.cache_utils import DynamicCache
 from transformers.generation.logits_process import MinPLogitsWarper, RepetitionPenaltyLogitsProcessor, TopPLogitsWarper
 
 from .modules.learned_pos_emb import LearnedPositionEmbeddings
@@ -280,7 +281,7 @@ class T3(nn.Module):
         # )
 
         device = embeds.device
-
+        
         bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
         bos_embed = self.speech_emb(bos_token)  # shape: (B, 1, embed_dim)
         bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
@@ -292,7 +293,7 @@ class T3(nn.Module):
         if cfg_weight > 0:
             inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
         else:
-            inputs_embeds = embeds
+            inputs_embeds = embeds  
 
         # Track generated token ids; start with the BOS token.
         generated_ids = bos_token.clone()
@@ -308,12 +309,15 @@ class T3(nn.Module):
             inputs_embeds=inputs_embeds,
             past_key_values=None,
             use_cache=True,
-            output_attentions=True,
+            output_attentions=False,
             output_hidden_states=True,
             return_dict=True,
         )
         # Initialize kv_cache with the full context.
-        past = output.past_key_values
+        if output.past_key_values is not None:
+            past = DynamicCache.from_legacy_cache(output.past_key_values)
+        else:
+            past = None
 
         # ---- Generation Loop using kv_cache ----
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
@@ -359,12 +363,15 @@ class T3(nn.Module):
             output = self.patched_model(
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
-                output_attentions=True,
+                output_attentions=False,
                 output_hidden_states=True,
                 return_dict=True,
             )
             # Update the kv_cache.
-            past = output.past_key_values
+            if output.past_key_values is not None:
+                past = DynamicCache.from_legacy_cache(output.past_key_values)
+            else:
+                past = None
 
         # Concatenate all predicted tokens along the sequence dimension.
         predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)

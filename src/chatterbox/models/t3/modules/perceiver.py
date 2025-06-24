@@ -7,7 +7,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from einops import rearrange
-
+from torch.nn.attention import SDPBackend
 
 class RelativePositionBias(nn.Module):
     def __init__(self, scale, causal=False, num_buckets=32, max_distance=128, heads=8):
@@ -61,16 +61,6 @@ class AttentionQKV(nn.Module):
         self.flash = flash
         self.dropout_rate = dropout_rate
         self.dropout = nn.Dropout(dropout_rate)
-        self.flash_config = self.setup_flash_config() if flash else None
-
-    def setup_flash_config(self):
-        # Setup flash attention configuration
-        flash_config = {
-            'enable_flash': True,
-            'enable_math': True,
-            'enable_mem_efficient': True
-        }
-        return flash_config
 
     def forward(self, q, k, v, mask=None):
         q, k, v = [self.split_heads(tensor) for tensor in [q, k, v]]
@@ -90,8 +80,7 @@ class AttentionQKV(nn.Module):
         return torch.einsum("bhts,bhls->bhlt", attn, v)
 
     def flash_attention(self, q, k, v, mask=None):
-        config = self.flash_config if self.flash_config else {}
-        with torch.backends.cuda.sdp_kernel(**config):
+        with torch.nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
             out = F.scaled_dot_product_attention(
                 q, k, v,
                 attn_mask=mask,
